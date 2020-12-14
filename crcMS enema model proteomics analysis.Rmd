@@ -1,0 +1,418 @@
+---
+title: "crcMS enema model proteomics analysis"
+author: "Bing Shui"
+date: "5/17/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Proteomics dataset 
+This is analysis for proteomics dataset generated using mouse colon tumor samples from Villin-CreER;Apc(fl/fl);KRasWT and Villin-CreER;Apc(fl/fl);KRasG12D mice. Tumor was induced through enema of 4-OHT in experimental and control mice. Emily Poulin harvested the tissue samples and the proteomics were performed by Joao Paulo. Part of the analysis code was adapted from original script from Shikha Sheth.
+
+## Library loading and set up
+```{r}
+suppressMessages(
+  c(library(gridExtra),
+    library(ensembldb),
+    library(EnsDb.Mmusculus.v79),
+    library(grid),
+    library(ggplot2),
+    library(lattice),
+    library(reshape),
+    library(mixOmics),
+    library(gplots),
+    library(RColorBrewer),
+    library(readr),
+    library(dplyr),
+    library(VennDiagram),
+    library(clusterProfiler),
+    library(DOSE),
+    library(org.Mm.eg.db), 
+    library(pathview),
+    library(AnnotationDbi),
+    library(tidyr),
+    library(qdapRegex),
+    library(gtools),
+    library(ggfortify))
+)
+```
+
+## Load the proteomics dataset and statistical analysis
+The original dataset was loaded.
+```{r}
+tumor_proteom <- read_csv("~/OneDrive - Harvard University/Haigis Lab/Projects/Halo-Ago2/Halo-Ago-KRas/Raw Data/Proteomics data/colon tumor-enema model/2017-03-19_Haigis_5v5_Pro.csv")
+```
+
+### Calculate the stats for G12D/WT
+```{r}
+# establish a new data frame for collecting stats
+tumor_stats <- tumor_proteom[,1:2]
+# Calculate the pvalue using parametric unpaired t test
+p_value_list <- c()
+for (i in 1:dim(tumor_proteom)[1]) {
+  p_value <- t.test(unlist(tumor_proteom[i,8:12]), unlist(tumor_proteom[i,3:7]), paired = FALSE)$p.value
+  p_value_list <- c(p_value_list, p_value)
+}
+tumor_stats <- cbind(tumor_stats, p_value_list)
+colnames(tumor_stats)[3] <- "p_values" 
+
+# calculate the q value using Benjamini Hochberg FDR correction
+q_value_list <- p.adjust(tumor_stats$p_values, method = "BH")
+tumor_stats <- cbind(tumor_stats, q_value_list)
+colnames(tumor_stats)[4] <- "q_values"
+
+# calculate fold change and log fold change
+foldchange_list <- c()
+for (i in 1:dim(tumor_proteom)[1]) {
+  foldchange <- foldchange(mean(unlist(tumor_proteom[i,8:12])), mean(unlist(tumor_proteom[i,3:7])))
+  foldchange_list <- c(foldchange_list, foldchange)
+}
+logfoldchange_list <- foldchange2logratio(foldchange_list)
+tumor_stats <- cbind(tumor_stats, foldchange_list, logfoldchange_list)
+colnames(tumor_stats)[5:6] <- c("foldChange", "LFC")
+```
+
+Now we output this statistical analysis file into a `csv` file.
+```{r}
+write.csv(tumor_stats, "crcMS_diff.csv", col.names = NULL)
+```
+
+Just to check how many siginificant proteins do we have based on p< 0.05 and q< 0.1
+```{r}
+sig_dif_stats <- subset(tumor_stats, tumor_stats$p_values <= 0.05 & tumor_stats$q_values <= 0.1)
+
+dim(sig_dif_stats)[1]
+```
+So there are 2471 proteins identified to have significantly different expression between G12D/WT.
+
+## Plot PCA and hierchical clustering
+### PCA plot
+Since the number of significant changes are quite small, I want to use PCA to check how the samples cluster.
+```{r}
+df <- tumor_proteom[3:12]
+df <- as.data.frame(t(df))
+df <- cbind(df, c('WT','WT','WT','WT','WT','G12D','G12D','G12D','G12D','G12D'))
+colnames(df)[8186] <- 'Genotype'
+df.set <- as.matrix(df[,1:8185])
+df.pca <- prcomp(df.set, center = TRUE, scale = TRUE)
+autoplot(df.pca, data = df, colour = 'Genotype') +
+  geom_text(aes(label=rownames(df)), vjust = 2, hjust = -0.1) +
+  xlim(-0.5, 0.6) + ylim(-0.7, 0.6)
+```
+
+### Hierchical clustering
+```{r}
+pseudoCount = log2(tumor_proteom[3:12])
+
+# remove NA, NaN, Inf values from the dataframe
+pseudoCount <- na.omit(pseudoCount)
+pseudoCount <- pseudoCount[is.finite(rowSums(pseudoCount)),]
+
+mat.dist = pseudoCount
+mat.dist = as.matrix(dist(t(mat.dist)))
+mat.dist = mat.dist/max(mat.dist)
+setwd("/Users/mizuhi/OneDrive - Harvard University/Haigis Lab/Projects/Halo-Ago2/Halo-Ago-KRas/Raw Data/Proteomics data/colon tumor-enema model")
+png('Hierchical_Clustering.png')
+cim(mat.dist, symkey = FALSE, margins = c(10, 10 ))
+suppressMessages(dev.off())
+```
+Final output is following:
+![Hierchical Clustering](/Users/mizuhi/OneDrive - Harvard University/Haigis Lab/Projects/Halo-Ago2/Halo-Ago-KRas/Raw Data/Proteomics data/colon tumor-enema model/Hierchical_Clustering.png)
+
+## Plot heatmap, scatterplot, MA plot, and volcano plot
+### Heatmap
+For heatmap, I will z-score all quantifications across all samples for the same protein. Heatmaps for all proteins with p<0.05 and q < 0.1 are plotted
+```{r}
+suppressMessages(library(mosaic))
+sig_index <- c()
+duplicate <- c()
+for (i in 1:dim(sig_dif_stats)[1]) {
+  index <- grep(sig_dif_stats$`Protein Id`[i], tumor_proteom$`Protein Id`)
+  if (length(index) == 1) {
+     sig_index <- c(sig_index, index)
+  }
+  else {
+    duplicate <- c(duplicate, i)
+  }
+}
+sig_count <- tumor_proteom[sig_index,]
+sig_dif <- cbind(sig_dif_stats[-duplicate,], sig_count)
+for (i in 1:dim(sig_dif)[1]) {
+  sig_dif[i,9:18] <- zscore(as.numeric(sig_dif[i,9:18]))
+}
+
+my_palette <- colorRampPalette(c("blue", "white", "red"))(256)
+heatmap_matrix <- as.matrix(sig_dif[,9:18])
+
+png('G12D vs WT colon tumor proteomics.png',
+    width = 600,
+    height = 1400,
+    res = 200,
+    pointsize = 8)
+par(cex.main=1.1)
+heatmap.2(heatmap_matrix,
+          main = "DE proteins in colon\ntumor(enema model)\n(G12D/WT) p < 0.05 q < 0.1",
+          density.info = "none",
+          key = TRUE,
+          lwid = c(3,7),
+          lhei = c(1,7),
+          col=my_palette,
+          margins = c(8,2),
+          symbreaks = TRUE,
+          trace = "none",
+          dendrogram = "row",
+          labRow = FALSE,
+          ylab = "Proteins",
+          cexCol = 1.5,
+          Colv = "NA")
+dev.off()
+```
+Final output is ![Heatmap for differential G12D/WT](/Users/mizuhi/OneDrive - Harvard University/Haigis Lab/Projects/Halo-Ago2/Halo-Ago-KRas/Raw Data/Proteomics data/colon tumor-enema model/G12D vs WT colon tumor proteomics.png)
+
+#### Scatter plot, MA plot and Volcano plot for data visualization
+```{r}
+# Scatter plot
+tumor_stats$KrasG12D_mean <- rowMeans(log2(tumor_proteom[,8:12]))
+tumor_stats$KrasWT_mean <- rowMeans(log2(tumor_proteom[,3:7]))
+ggplot(tumor_stats, aes(x = KrasWT_mean, y = KrasG12D_mean)) +
+  xlab("WT_Average(log2)") + ylab("G12D_Average(log2)") + 
+  geom_point(data = tumor_stats, alpha = 0.5, size = 1, color = "grey") +
+  geom_point(data = subset(tumor_stats,tumor_stats$p_values < 0.05 & tumor_stats$q_values < 0.1 & tumor_stats$LFC > 0), alpha = 0.5, size = 1, color = "red") +
+  geom_point(data = subset(tumor_stats,tumor_stats$p_values < 0.05 & tumor_stats$q_values < 0.1 & tumor_stats$LFC < 0), alpha = 0.5, size = 1, color = "blue") +
+  labs(title = "G12D vs WT Scatter Plot")
+
+# MA plot
+tumor_stats$'baseMean' <- rowMeans(tumor_proteom[,3:12])
+tumor_stats$'log2baseMean' <- log(tumor_stats$`baseMean`,2)
+red_subset <- subset(tumor_stats,tumor_stats$p_values < 0.05 & tumor_stats$q_values < 0.1 & tumor_stats$LFC > 0)
+blue_subset <- subset(tumor_stats,tumor_stats$p_values < 0.05 & tumor_stats$q_values < 0.1 & tumor_stats$LFC < 0)
+ggplot(tumor_stats, aes(x = tumor_stats$`log2baseMean`, y = tumor_stats$`LFC`)) +
+  xlab("Average Expression") + ylab("LFC") +
+  geom_point(data = tumor_stats, alpha = 0.5, size = 1, color = "grey") +
+  geom_point(data = red_subset, aes(x=red_subset$`log2baseMean`, y=red_subset$`LFC`), alpha = 0.5, size = 1, color = "red") +
+  geom_point(data = blue_subset, aes(x=blue_subset$`log2baseMean`, y=blue_subset$`LFC`), alpha = 0.5, size = 1, color = "blue") +
+  labs(title = "G12D vs WT MA Plot")
+
+# Volcano Plot
+ggplot(tumor_stats, aes(x = tumor_stats$`LFC`, y = -log(tumor_stats$`p_values`,10))) +
+  xlab("LFC") + ylab("-log10(P value)") + 
+  geom_point(data = tumor_stats, alpha = 0.5, size = 1, color = "grey") +
+  geom_point(data = red_subset, aes(x=red_subset$`LFC`, y=-log(red_subset$`p_values`,10)), alpha = 0.5, size = 1, color = "red") +
+  geom_point(data = blue_subset, aes(x=blue_subset$`LFC`, y=-log(blue_subset$`p_values`,10)), alpha = 0.5, size = 1, color = "blue") +
+labs(title = "G12D vs WT Volcano Plot")
+```
+
+## GO analysis
+For the Go analysis, I am using all proteins that have a p<0.05 and q < 0.1. 
+```{r}
+target_gene <- as.character(sig_dif_stats$`Protein Id`)
+detected_gene <- as.character(tumor_proteom$`Protein Id`)
+
+# Run GO enrichment analysis for biological process
+ego_BP <- enrichGO(gene = target_gene, 
+                universe = detected_gene,
+                keyType = "UNIPROT",
+                OrgDb = org.Mm.eg.db, 
+                ont = "BP", 
+                pAdjustMethod = "BH", 
+                pvalueCutoff = 0.05, 
+                readable = TRUE)
+
+# Output results from GO analysis to a table
+cluster_summary_BP <- data.frame(ego_BP)
+dim(cluster_summary_BP)[1]
+write.csv(cluster_summary_BP, "GO/GO analysis_BP.csv")
+
+# Run GO enrichment analysis for molecular function 
+ego_MF <- enrichGO(gene = target_gene, 
+                universe = detected_gene,
+                keyType = "UNIPROT",
+                OrgDb = org.Mm.eg.db, 
+                ont = "MF", 
+                pAdjustMethod = "BH", 
+                pvalueCutoff = 0.05, 
+                readable = TRUE)
+
+# Output results from GO analysis to a table
+cluster_summary_MF <- data.frame(ego_MF)
+dim(cluster_summary_MF)[1]
+write.csv(cluster_summary_MF, "GO/GO analysis_MF.csv")
+
+# Run GO enrichment analysis for cellular component 
+ego_CC <- enrichGO(gene = target_gene, 
+                universe = detected_gene,
+                keyType = "UNIPROT",
+                OrgDb = org.Mm.eg.db, 
+                ont = "CC", 
+                pAdjustMethod = "BH", 
+                pvalueCutoff = 0.05, 
+                readable = TRUE)
+
+# Output results from GO analysis to a table
+cluster_summary_CC <- data.frame(ego_CC)
+dim(cluster_summary_CC)[1]
+write.csv(cluster_summary_CC, "GO/GO analysis_CC.csv")
+```
+
+### Draw Dotplot representing the results
+#### Biological Process
+```{r}
+png('GO/GO dotplot_BP.png',
+    width = 1400,
+    height = 1600,
+    res = 100,
+    pointsize = 8)
+dotplot(ego_BP, showCategory=50)
+dev.off()
+```
+Final output is following:
+![BP_dotplot](/Users/mizuhi/OneDrive - Harvard University/Haigis Lab/Projects/Halo-Ago2/Halo-Ago-KRas/Raw Data/Proteomics data/colon tumor-enema model/GO/GO dotplot_BP.png)
+#### Molecular Function
+```{r}
+png('GO/GO dotplot_MF.png',
+    width = 1000,
+    height = 800,
+    res = 100,
+    pointsize = 8)
+dotplot(ego_MF, showCategory=50)
+dev.off()
+```
+Final output is following:
+![MF_dotplot](/Users/mizuhi/OneDrive - Harvard University/Haigis Lab/Projects/Halo-Ago2/Halo-Ago-KRas/Raw Data/Proteomics data/colon tumor-enema model/GO/GO dotplot_MF.png)
+#### Cellular Component
+```{r}
+png('GO/GO dotplot_CC.png',
+    width = 1400,
+    height = 1600,
+    res = 100,
+    pointsize = 8)
+dotplot(ego_CC, showCategory=50)
+dev.off()
+```
+Final output is following:
+![CC_dotplot](/Users/mizuhi/OneDrive - Harvard University/Haigis Lab/Projects/Halo-Ago2/Halo-Ago-KRas/Raw Data/Proteomics data/colon tumor-enema model/GO/GO dotplot_CC.png)
+
+### Draw enrichment Go plot representing the results
+#### Biological Process
+```{r}
+png('GO/GO enrichment_BP.png',
+    width = 1600,
+    height = 1600,
+    res = 100,
+    pointsize = 8)
+emapplot(ego_BP, showCategory = 50)
+dev.off()
+```
+Final output is following:
+![BP_enrichplot](/Users/mizuhi/OneDrive - Harvard University/Haigis Lab/Projects/Halo-Ago2/Halo-Ago-KRas/Raw Data/Proteomics data/colon tumor-enema model/GO/GO enrichment_BP.png)
+#### Molecular Function
+```{r}
+png('GO/GO enrichment_MF.png',
+    width = 1000,
+    height = 1000,
+    res = 100,
+    pointsize = 8)
+emapplot(ego_MF, showCategory = 50)
+dev.off()
+```
+Final output is following:
+![MF_enrichplot](/Users/mizuhi/OneDrive - Harvard University/Haigis Lab/Projects/Halo-Ago2/Halo-Ago-KRas/Raw Data/Proteomics data/colon tumor-enema model/GO/GO enrichment_MF.png)
+#### Cellular Component
+```{r}
+png('GO/GO enrichment_CC.png',
+    width = 1000,
+    height = 1000,
+    res = 100,
+    pointsize = 8)
+emapplot(ego_CC, showCategory = 50)
+dev.off()
+```
+Final output is following:
+![CC_enrichplot](/Users/mizuhi/OneDrive - Harvard University/Haigis Lab/Projects/Halo-Ago2/Halo-Ago-KRas/Raw Data/Proteomics data/colon tumor-enema model/GO/GO enrichment_CC.png)
+
+### Draw category netplot representing the results
+
+The category netplot shows the relationships between the genes associated with the top five most significant GO terms and the fold changes of the significant genes associated with these terms (color). 
+
+#### Biological Process
+```{r}
+# annotate the tumor stats with gene symbol
+annotations_edb <- AnnotationDbi::select(org.Mm.eg.db,
+                                           keys = tumor_stats$`Protein Id`,
+                                           columns = c("ENSEMBL", "SYMBOL"),
+                                           keytype = "UNIPROT")
+
+# Determine the indices for the non-duplicated genes
+non_duplicates_idx <- which(duplicated(annotations_edb$UNIPROT) == FALSE)
+non_duplicates_idx <- which(duplicated(annotations_edb$ENSEMBL) == FALSE)
+non_duplicates_idx <- which(is.na(annotations_edb$ENSEMBL) == FALSE)
+
+# Return only the non-duplicated genes using indices
+annotations_edb <- annotations_edb[non_duplicates_idx, ]
+
+# Check number of NAs returned
+is.na(annotations_edb$ENSEMBL) %>%
+  which() %>%
+  length()
+
+# Join the Ensembl annotation to proteomics quantification
+tumor_stats <- inner_join(tumor_stats, annotations_edb, by=c("Protein Id"="UNIPROT"))
+
+OE_foldchanges <- tumor_stats$LFC
+names(OE_foldchanges) <- tumor_stats$SYMBOL
+png('GO/GO cnetplot_BP.png',
+    width = 1600,
+    height = 1600,
+    res = 100,
+    pointsize = 8)
+cnetplot(ego_BP, 
+         categorySize="pvalue", 
+         showCategory = 5, 
+         foldChange=OE_foldchanges, 
+         vertex.label.font=6)
+dev.off()
+```
+Final output is following:
+![BP_cnetplot](/Users/mizuhi/OneDrive - Harvard University/Haigis Lab/Projects/Halo-Ago2/Halo-Ago-KRas/Raw Data/Proteomics data/colon tumor-enema model/GO/GO cnetplot_BP.png)
+#### Molecular Function
+```{r}
+png('GO/GO cnetplot_MF.png',
+    width = 1600,
+    height = 1600,
+    res = 100,
+    pointsize = 8)
+cnetplot(ego_MF, 
+         categorySize="pvalue", 
+         showCategory = 5, 
+         foldChange=OE_foldchanges, 
+         vertex.label.font=6)
+dev.off()
+```
+Final output is following:
+![MF_cnetplot](/Users/mizuhi/OneDrive - Harvard University/Haigis Lab/Projects/Halo-Ago2/Halo-Ago-KRas/Raw Data/Proteomics data/colon tumor-enema model/GO/GO cnetplot_MF.png)
+#### Cellular Component
+```{r}
+png('GO/GO cnetplot_CC.png',
+    width = 1600,
+    height = 1600,
+    res = 100,
+    pointsize = 8)
+cnetplot(ego_CC, 
+         categorySize="pvalue", 
+         showCategory = 5, 
+         foldChange=OE_foldchanges, 
+         vertex.label.font=6)
+dev.off()
+```
+Final output is following:
+![CC_cnetplot](/Users/mizuhi/OneDrive - Harvard University/Haigis Lab/Projects/Halo-Ago2/Halo-Ago-KRas/Raw Data/Proteomics data/colon tumor-enema model/GO/GO cnetplot_CC.png)
+
+## GSEA
+I need to generate a quantification file that also has ensembl ID with them.
+```{r}
+tumor_gsea <- inner_join(tumor_proteom, annotations_edb, by=c("Protein Id"="UNIPROT"))
+write.csv(tumor_gsea, "GSEA/Raw Quantification.csv")
+```
