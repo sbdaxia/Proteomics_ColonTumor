@@ -1,0 +1,279 @@
+---
+title: "Casein kinase substrate phosphorylations"
+author: "Bing Shui"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: yes
+    toc_float: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Library Preparation
+```{r}
+suppressMessages(
+  c(library(tidyverse),
+    library(RColorBrewer),
+    library(gplots),
+    library(knitr),
+    library(mosaic))
+)
+```
+
+# Objective
+To investigate the phosphorylation status of members of the casein kinase families and select substrates unique to Csnk2a1 for WB validation.
+
+Casein kinase family members examined here:
+  - Csnk1a1 (CK1A)
+  - Csnk1d (CK1D)
+  - Csnk1e (CK1E)
+  - Csnk2a1 (CK2A1)
+  - Csnk2a2 (CK2A2)
+  - Csnk2b (CK2B)
+  
+Unscaled and scaled (to total protein change) phosphorylation status will be examined.
+
+# Load datasets
+```{r}
+# Load kinase-substrate list from Doug Brubaker
+k.s.list <-read_tsv("../kinsubset_prot_acc_mouse_20170418.gmx.txt")
+k.s.list <- k.s.list[-1,]
+## Select only casein kinases
+k.s.list <- k.s.list %>% select(c("CK1A", "CK1D", "CK1E", "CK2A1", "CK2A2", "CK2B"))
+keep_rows <- rowSums(!is.na(k.s.list))>0
+k.s.list <- k.s.list[keep_rows,]
+
+# get a list of all kinase substrates
+k.s.list.all <-read_tsv("../kinsubset_prot_acc_mouse_20170418.gmx.txt")
+k.s.list.all <- k.s.list.all[-1,]
+substrate_list <- unlist(as.data.frame(k.s.list.all)) 
+substrate_list <- substrate_list[!is.na(substrate_list)]
+substrate_freq <- as_tibble(table(substrate_list))
+colnames(substrate_freq)[2] <- "Num_targeting_kinase"
+
+# Load total proteomics dataset
+total_prot <- read_csv("crcMS_diff.csv")
+total_prot_quant <- read_csv("2017-03-19_Haigis_5v5_Pro.csv")
+
+# Load phosphoproteomics dataset
+phos_prot <- read_csv("crcMS_phospho_diff.csv")
+phos_prot$site_id <- paste(phos_prot$`Protein Id`, phos_prot$`Site Position`, sep = "_")
+phos_prot$name_id <- paste(phos_prot$gene_symbol, phos_prot$`Site Position`, sep = "_")
+phos_prot_quant <- read_csv("2017-03-19_Haigis_5v5_Phos.csv")
+phos_prot_quant$site_id <- paste(phos_prot_quant$`Protein Id`, phos_prot_quant$`Site Position`, sep = "_")
+phos_prot_quant$name_id <- paste(phos_prot_quant$gene_symbol, phos_prot_quant$`Site Position`, sep = "_")
+```
+
+# Analysis
+## Set up function
+```{r}
+phospho_target_info <- function(kinase, all_height, sig_height) {
+  # all target info
+  target <- k.s.list %>% select(kinase) %>% na.omit() %>% unlist()
+  target_phospho <- phos_prot %>% filter(site_id %in% target)
+  target_phospho <- inner_join(target_phospho, total_prot[,c(2,7)], by = c("Protein Id" = "Protein Id"))
+  target_phospho_quant <- phos_prot_quant %>% filter(site_id %in% target_phospho$site_id)
+  colnames(target_phospho)[c(10,13)] <- c("Phospho_LFC", "Protein_LFC")
+  target_phospho$scaled_phospho_LFC <- target_phospho$Phospho_LFC - target_phospho$Protein_LFC
+  target_phospho <- inner_join(target_phospho, substrate_freq, by = c("site_id" = "substrate_list"))
+  if(dim(target_phospho)[1]> 0) {
+    filename <- paste("CK_Target/", kinase, "_target_phosphorylations.csv", sep = "")
+    write_csv(target_phospho, filename)
+  }
+ 
+  # Significant target phosphosite info (p < 0.05)
+  sig_target_phospho <- target_phospho %>% filter(p_values <= 0.05)
+  sig_target_phospho_quant <- target_phospho_quant %>% filter(site_id %in% sig_target_phospho$site_id)
+  print(paste("Number of significantly changed target phosphorylations of ", kinase, ": ", dim(sig_target_phospho)[1], sep = ""))
+  
+  if (dim(sig_target_phospho)[1] > 0) {
+    filename <- paste("CK_Target/", kinase, "_sig_target_phosphorylations.csv", sep = "")
+    write_csv(sig_target_phospho, filename)
+  }
+  # Heatmap of all targets (unscaled and scaled)
+  my_palette <- colorRampPalette(c("blue", "white", "red"))(100)
+  if (dim(target_phospho)[1] > 1) {
+    # LFC heatmap
+    heatmap_matrix <- as.matrix(target_phospho[,c(10,14)])
+    rownames(heatmap_matrix) <- target_phospho$name_id
+    figure_name <- paste("CK_Target/", kinase, "_target_phosphorylations_LFC.png", sep = "")
+    png(figure_name,
+        width = 600,
+        height = all_height,
+        res = 100,
+        pointsize = 8)
+    par(cex.main=1.1)
+    heatmap.2(heatmap_matrix,
+              main = paste(kinase, "target phosphorylations LFC"),
+              density.info = "none",
+              key = TRUE,
+              lwid = c(3,7),
+              lhei = c(1,7),
+              col=my_palette,
+              margins = c(15,10),
+              symbreaks = TRUE,
+              breaks=seq(-2,2,0.04),
+              trace = "none",
+              dendrogram = "row",
+              labRow = rownames(heatmap_matrix),
+              cexCol = 1.5,
+              Colv = "NA")
+    dev.off()
+    
+    # Quantification heatmap
+    heatmap_matrix <- as.matrix(target_phospho_quant[, c(6:15)])
+    heatmap_matrix <- t(apply(heatmap_matrix, 1, zscore))
+    rownames(heatmap_matrix) <- target_phospho_quant$name_id
+    figure_name <- paste("CK_Target/", kinase, "_target_phosphorylations_quant.png", sep = "")
+    png(figure_name,
+        width = 600,
+        height = all_height,
+        res = 100,
+        pointsize = 8)
+    par(cex.main=1.1)
+    heatmap.2(heatmap_matrix,
+              main = paste(kinase, "target phosphorylations Quant"),
+              density.info = "none",
+              key = TRUE,
+              lwid = c(3,7),
+              lhei = c(1,7),
+              col=my_palette,
+              margins = c(15,10),
+              symbreaks = TRUE,
+              trace = "none",
+              dendrogram = "row",
+              labRow = rownames(heatmap_matrix),
+              cexCol = 1.5,
+              Colv = "NA")
+    dev.off()
+  }
+  
+  # Heatmap of significant targets (unscaled and scaled)
+  if (dim(sig_target_phospho)[1] > 1) {
+    # Sig LFC heatmap
+    heatmap_matrix <- as.matrix(sig_target_phospho[,c(10,14)])
+    rownames(heatmap_matrix) <- sig_target_phospho$name_id
+    figure_name <- paste("CK_Target/", kinase, "_sig_target_phosphorylations_LFC.png", sep = "")
+    png(figure_name,
+        width = 600,
+        height = sig_height,
+        res = 100,
+        pointsize = 8)
+    par(cex.main=1.1)
+    heatmap.2(heatmap_matrix,
+              main = paste(kinase, "sig target phosphorylations LFC"),
+              density.info = "none",
+              key = TRUE,
+              lwid = c(3,7),
+              lhei = c(1,7),
+              col=my_palette,
+              margins = c(15,10),
+              symbreaks = TRUE,
+              breaks=seq(-2,2,0.04),
+              trace = "none",
+              dendrogram = "row",
+              labRow = rownames(heatmap_matrix),
+              cexCol = 1.5,
+              Colv = "NA")
+    dev.off()
+    
+    # Sig Quantification heatmap
+    heatmap_matrix <- as.matrix(sig_target_phospho_quant[, c(6:15)])
+    heatmap_matrix <- t(apply(heatmap_matrix, 1, zscore))
+    rownames(heatmap_matrix) <- sig_target_phospho_quant$name_id
+    figure_name <- paste("CK_Target/", kinase, "_sig_target_phosphorylations_quant.png", sep = "")
+    png(figure_name,
+        width = 600,
+        height = sig_height,
+        res = 100,
+        pointsize = 8)
+    par(cex.main=1.1)
+    heatmap.2(heatmap_matrix,
+              main = paste(kinase, "sig target phosphorylations Quant"),
+              density.info = "none",
+              key = TRUE,
+              lwid = c(3,7),
+              lhei = c(1,7),
+              col=my_palette,
+              margins = c(15,10),
+              symbreaks = TRUE,
+              trace = "none",
+              dendrogram = "row",
+              labRow = rownames(heatmap_matrix),
+              cexCol = 1.5,
+              Colv = "NA")
+    dev.off()
+  }
+}
+
+```
+
+## Csnk1a1 (CK1A)
+```{r}
+phospho_target_info("CK1A", 800, 600)
+figures <- list.files("CK_Target", ".*CK1A.*\\.png$")
+if (length(figures)>0) {
+  paths <- paste0("CK_Target/", figures)
+  include_graphics(paths)
+}
+```
+
+## Csnk1d (CK1D)
+```{r}
+phospho_target_info("CK1D", 800, 600)
+figures <- list.files("CK_Target", ".*CK1D.*\\.png$")
+if (length(figures)>0) {
+  paths <- paste0("CK_Target/", figures)
+  include_graphics(paths)
+}
+```
+
+## Csnk1e (CK1E)
+```{r}
+phospho_target_info("CK1E", 800, 600)
+figures <- list.files("CK_Target", ".*CK1E.*\\.png$")
+if (length(figures)>0) {
+  paths <- paste0("CK_Target/", figures)
+  include_graphics(paths)
+}
+```
+
+## Csnk2a1 (CK2A1)
+```{r}
+phospho_target_info("CK2A1", 1400, 800)
+figures <- list.files("CK_Target", ".*CK2A1.*\\.png$")
+if (length(figures)>0) {
+  paths <- paste0("CK_Target/", figures)
+  include_graphics(paths)
+}
+```
+
+## Csnk2a2 (CK2A2)
+```{r}
+phospho_target_info("CK2A2", 600, 800)
+figures <- list.files("CK_Target", ".*CK2A2.*\\.png$")
+if (length(figures)>0) {
+  paths <- paste0("CK_Target/", figures)
+  include_graphics(paths)
+}
+```
+
+## Csnk2b (CK2B)
+```{r}
+phospho_target_info("CK2B", 600, 800)
+figures <- list.files("CK_Target", ".*CK2B.*\\.png$")
+if (length(figures)>0) {
+  paths <- paste0("CK_Target/", figures)
+  include_graphics(paths)
+}
+```
+
+# Session Info
+```{r}
+sessionInfo()
+```
