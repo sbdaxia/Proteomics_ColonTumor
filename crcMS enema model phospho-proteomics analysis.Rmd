@@ -19,8 +19,6 @@ This is analysis for the phospho-proteomics dataset generated using mouse colon 
 
 ## Library loading and set up
 ```{r message=FALSE, warning=FALSE}
-options(connectionObserver = NULL)
-
 library(gridExtra)
 library(ensembldb)
 library(EnsDb.Mmusculus.v79)
@@ -34,7 +32,6 @@ library(RColorBrewer)
 library(readr)
 library(dplyr)
 library(VennDiagram)
-library(clusterProfiler)
 library(DOSE)
 library(org.Mm.eg.db)
 library(pathview)
@@ -114,6 +111,14 @@ df.pca <- prcomp(df.set, center = TRUE, scale = TRUE)
 autoplot(df.pca, data = df, colour = 'Genotype') +
   geom_text(aes(label=rownames(df)), vjust = 2, hjust = -0.1) +
   xlim(-0.9, 0.5) + ylim(-0.5, 0.4)
+
+pdf('PDF_figure/PCA_Phospho.pdf',
+    height = 4,
+    width = 6)
+autoplot(df.pca, data = df, colour = 'Genotype') +
+  geom_text(aes(label=rownames(df)), vjust = 2, hjust = -0.1) +
+  xlim(-0.9, 0.5) + ylim(-0.5, 0.4)
+dev.off()
 ```
 
 ### Hierchical clustering
@@ -130,6 +135,10 @@ mat.dist = mat.dist/max(mat.dist)
 png('Hierchical_Clustering_Phospho.png')
 cim(mat.dist, symkey = FALSE, margins = c(10, 10 ))
 suppressMessages(dev.off())
+
+pdf('PDF_figure/Hierchical_Clustering_Phospho.pdf')
+cim(mat.dist, symkey = FALSE, margins = c(10, 10 ))
+dev.off()
 ```
 Final output is following:
 ![Hierchical Clustering](Hierchical_Clustering_Phospho.png)
@@ -174,6 +183,26 @@ heatmap.2(heatmap_matrix,
           cexCol = 1.5,
           Colv = "NA")
 dev.off()
+
+pdf('PDF_figure/Heatmap_Phospho.pdf',
+    width = 6,
+    height = 14)
+heatmap.2(heatmap_matrix,
+          main = "DE phosphorylations\nin enema colon tumor\n(G12D/WT) p < 0.05",
+          density.info = "none",
+          key = TRUE,
+          lwid = c(3,7),
+          lhei = c(1,7),
+          col=my_palette,
+          margins = c(8,2),
+          symbreaks = TRUE,
+          trace = "none",
+          dendrogram = "row",
+          labRow = FALSE,
+          ylab = "Proteins",
+          cexCol = 1.5,
+          Colv = "NA")
+dev.off()
 ```
 Final output is ![Heatmap for differential G12D/WT](G12D vs WT colon tumor phospho-proteomics.png)
 
@@ -189,6 +218,17 @@ ggplot(tumor_stats, aes(x = KrasWT_mean, y = KrasG12D_mean)) +
   geom_point(data = subset(tumor_stats,tumor_stats$p_values < 0.05 & tumor_stats$LFC < 0), alpha = 0.5, size = 1, color = "blue") +
   labs(title = "G12D vs WT Scatter Plot")
 
+pdf('PDF_figure/Scatter_Plot_Phospho.pdf',
+    width = 5,
+    height = 4)
+ggplot(tumor_stats, aes(x = KrasWT_mean, y = KrasG12D_mean)) +
+  xlab("WT_Average(log2)") + ylab("G12D_Average(log2)") + 
+  geom_point(data = tumor_stats, alpha = 0.5, size = 1, color = "grey") +
+  geom_point(data = subset(tumor_stats,tumor_stats$p_values < 0.05 & tumor_stats$LFC > 0), alpha = 0.5, size = 1, color = "red") +
+  geom_point(data = subset(tumor_stats,tumor_stats$p_values < 0.05 & tumor_stats$LFC < 0), alpha = 0.5, size = 1, color = "blue") +
+  labs(title = "G12D vs WT Scatter Plot")
+dev.off()
+
 # MA plot
 tumor_stats$'baseMean' <- rowMeans(tumor_proteom[,6:15])
 tumor_stats$'log2baseMean' <- log(tumor_stats$`baseMean`,2)
@@ -201,6 +241,17 @@ ggplot(tumor_stats, aes(x = `log2baseMean`, y = `LFC`)) +
   geom_point(data = blue_subset, aes(x=`log2baseMean`, y=`LFC`), alpha = 0.5, size = 1, color = "blue") +
   labs(title = "G12D vs WT MA Plot")
 
+pdf('PDF_figure/MA_Plot.pdf',
+    width = 5,
+    height = 4)
+ggplot(tumor_stats, aes(x = `log2baseMean`, y = `LFC`)) +
+  xlab("Average Expression") + ylab("LFC") +
+  geom_point(data = tumor_stats, alpha = 0.5, size = 1, color = "grey") +
+  geom_point(data = red_subset, aes(x=`log2baseMean`, y=`LFC`), alpha = 0.5, size = 1, color = "red") +
+  geom_point(data = blue_subset, aes(x=`log2baseMean`, y=`LFC`), alpha = 0.5, size = 1, color = "blue") +
+  labs(title = "G12D vs WT MA Plot")
+dev.off()
+
 # Volcano Plot
 ggplot(tumor_stats, aes(x = `LFC`, y = -log(`p_values`,10))) +
   xlab("LFC") + ylab("-log10(P value)") + 
@@ -208,6 +259,17 @@ ggplot(tumor_stats, aes(x = `LFC`, y = -log(`p_values`,10))) +
   geom_point(data = red_subset, aes(x=`LFC`, y=-log(`p_values`,10)), alpha = 0.5, size = 1, color = "red") +
   geom_point(data = blue_subset, aes(x=`LFC`, y=-log(`p_values`,10)), alpha = 0.5, size = 1, color = "blue") +
 labs(title = "G12D vs WT Volcano Plot")
+
+pdf('PDF_figure/Volcano_Plot.pdf',
+    width = 5,
+    height = 4)
+ggplot(tumor_stats, aes(x = `LFC`, y = -log(`p_values`,10))) +
+  xlab("LFC") + ylab("-log10(P value)") + 
+  geom_point(data = tumor_stats, alpha = 0.5, size = 1, color = "grey") +
+  geom_point(data = red_subset, aes(x=`LFC`, y=-log(`p_values`,10)), alpha = 0.5, size = 1, color = "red") +
+  geom_point(data = blue_subset, aes(x=`LFC`, y=-log(`p_values`,10)), alpha = 0.5, size = 1, color = "blue") +
+labs(title = "G12D vs WT Volcano Plot")
+dev.off()
 ```
 
 ## SessionInfo

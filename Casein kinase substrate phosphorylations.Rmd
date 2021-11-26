@@ -15,14 +15,12 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 # Library Preparation
-```{r}
-suppressMessages(
-  c(library(tidyverse),
-    library(RColorBrewer),
-    library(gplots),
-    library(knitr),
-    library(mosaic))
-)
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(RColorBrewer)
+library(gplots)
+library(knitr)
+library(mosaic)
 ```
 
 # Objective
@@ -41,7 +39,7 @@ Unscaled and scaled (to total protein change) phosphorylation status will be exa
 # Load datasets
 ```{r}
 # Load kinase-substrate list from Doug Brubaker
-k.s.list <-read_tsv("../kinsubset_prot_acc_mouse_20170418.gmx.txt")
+k.s.list <-read_tsv("CK_Target/kinsubset_prot_acc_mouse_20170418.gmx.txt")
 k.s.list <- k.s.list[-1,]
 ## Select only casein kinases
 k.s.list <- k.s.list %>% select(c("CK1A", "CK1D", "CK1E", "CK2A1", "CK2A2", "CK2B"))
@@ -49,7 +47,7 @@ keep_rows <- rowSums(!is.na(k.s.list))>0
 k.s.list <- k.s.list[keep_rows,]
 
 # get a list of all kinase substrates
-k.s.list.all <-read_tsv("../kinsubset_prot_acc_mouse_20170418.gmx.txt")
+k.s.list.all <-read_tsv("CK_Target/kinsubset_prot_acc_mouse_20170418.gmx.txt")
 k.s.list.all <- k.s.list.all[-1,]
 substrate_list <- unlist(as.data.frame(k.s.list.all)) 
 substrate_list <- substrate_list[!is.na(substrate_list)]
@@ -72,7 +70,7 @@ phos_prot_quant$name_id <- paste(phos_prot_quant$gene_symbol, phos_prot_quant$`S
 # Analysis
 ## Set up function
 ```{r}
-phospho_target_info <- function(kinase, all_height, sig_height) {
+phospho_target_info <- function(kinase, all_height=12, sig_height=10) {
   # all target info
   target <- k.s.list %>% select(kinase) %>% na.omit() %>% unlist()
   target_phospho <- phos_prot %>% filter(site_id %in% target)
@@ -101,12 +99,10 @@ phospho_target_info <- function(kinase, all_height, sig_height) {
     # LFC heatmap
     heatmap_matrix <- as.matrix(target_phospho[,c(10,14)])
     rownames(heatmap_matrix) <- target_phospho$name_id
-    figure_name <- paste("CK_Target/", kinase, "_target_phosphorylations_LFC.png", sep = "")
-    png(figure_name,
-        width = 600,
-        height = all_height,
-        res = 100,
-        pointsize = 8)
+    figure_name <- paste("CK_Target/", kinase, "_target_phosphorylations_LFC.pdf", sep = "")
+    pdf(figure_name,
+        width = 8,
+        height = all_height)
     par(cex.main=1.1)
     heatmap.2(heatmap_matrix,
               main = paste(kinase, "target phosphorylations LFC"),
@@ -115,7 +111,7 @@ phospho_target_info <- function(kinase, all_height, sig_height) {
               lwid = c(3,7),
               lhei = c(1,7),
               col=my_palette,
-              margins = c(15,10),
+              margins = c(16,10),
               symbreaks = TRUE,
               breaks=seq(-2,2,0.04),
               trace = "none",
@@ -129,12 +125,10 @@ phospho_target_info <- function(kinase, all_height, sig_height) {
     heatmap_matrix <- as.matrix(target_phospho_quant[, c(6:15)])
     heatmap_matrix <- t(apply(heatmap_matrix, 1, zscore))
     rownames(heatmap_matrix) <- target_phospho_quant$name_id
-    figure_name <- paste("CK_Target/", kinase, "_target_phosphorylations_quant.png", sep = "")
-    png(figure_name,
-        width = 600,
-        height = all_height,
-        res = 100,
-        pointsize = 8)
+    figure_name <- paste("CK_Target/", kinase, "_target_phosphorylations_quant.pdf", sep = "")
+    pdf(figure_name,
+        width = 8,
+        height = all_height)
     par(cex.main=1.1)
     heatmap.2(heatmap_matrix,
               main = paste(kinase, "target phosphorylations Quant"),
@@ -143,7 +137,7 @@ phospho_target_info <- function(kinase, all_height, sig_height) {
               lwid = c(3,7),
               lhei = c(1,7),
               col=my_palette,
-              margins = c(15,10),
+              margins = c(16,10),
               symbreaks = TRUE,
               trace = "none",
               dendrogram = "row",
@@ -158,12 +152,10 @@ phospho_target_info <- function(kinase, all_height, sig_height) {
     # Sig LFC heatmap
     heatmap_matrix <- as.matrix(sig_target_phospho[,c(10,14)])
     rownames(heatmap_matrix) <- sig_target_phospho$name_id
-    figure_name <- paste("CK_Target/", kinase, "_sig_target_phosphorylations_LFC.png", sep = "")
-    png(figure_name,
-        width = 600,
-        height = sig_height,
-        res = 100,
-        pointsize = 8)
+    figure_name <- paste("CK_Target/", kinase, "_sig_target_phosphorylations_LFC.pdf", sep = "")
+    pdf(figure_name,
+        width = 8,
+        height = sig_height)
     par(cex.main=1.1)
     heatmap.2(heatmap_matrix,
               main = paste(kinase, "sig target phosphorylations LFC"),
@@ -172,7 +164,7 @@ phospho_target_info <- function(kinase, all_height, sig_height) {
               lwid = c(3,7),
               lhei = c(1,7),
               col=my_palette,
-              margins = c(15,10),
+              margins = c(16,10),
               symbreaks = TRUE,
               breaks=seq(-2,2,0.04),
               trace = "none",
@@ -186,12 +178,10 @@ phospho_target_info <- function(kinase, all_height, sig_height) {
     heatmap_matrix <- as.matrix(sig_target_phospho_quant[, c(6:15)])
     heatmap_matrix <- t(apply(heatmap_matrix, 1, zscore))
     rownames(heatmap_matrix) <- sig_target_phospho_quant$name_id
-    figure_name <- paste("CK_Target/", kinase, "_sig_target_phosphorylations_quant.png", sep = "")
-    png(figure_name,
-        width = 600,
-        height = sig_height,
-        res = 100,
-        pointsize = 8)
+    figure_name <- paste("CK_Target/", kinase, "_sig_target_phosphorylations_quant.pdf", sep = "")
+    pdf(figure_name,
+        width = 8,
+        height = sig_height)
     par(cex.main=1.1)
     heatmap.2(heatmap_matrix,
               main = paste(kinase, "sig target phosphorylations Quant"),
@@ -200,7 +190,7 @@ phospho_target_info <- function(kinase, all_height, sig_height) {
               lwid = c(3,7),
               lhei = c(1,7),
               col=my_palette,
-              margins = c(15,10),
+              margins = c(16,10),
               symbreaks = TRUE,
               trace = "none",
               dendrogram = "row",
@@ -215,8 +205,8 @@ phospho_target_info <- function(kinase, all_height, sig_height) {
 
 ## Csnk1a1 (CK1A)
 ```{r}
-phospho_target_info("CK1A", 800, 600)
-figures <- list.files("CK_Target", ".*CK1A.*\\.png$")
+phospho_target_info("CK1A")
+figures <- list.files("CK_Target", ".*CK1A.*\\.pdf$")
 if (length(figures)>0) {
   paths <- paste0("CK_Target/", figures)
   include_graphics(paths)
@@ -225,8 +215,8 @@ if (length(figures)>0) {
 
 ## Csnk1d (CK1D)
 ```{r}
-phospho_target_info("CK1D", 800, 600)
-figures <- list.files("CK_Target", ".*CK1D.*\\.png$")
+phospho_target_info("CK1D")
+figures <- list.files("CK_Target", ".*CK1D.*\\.pdf$")
 if (length(figures)>0) {
   paths <- paste0("CK_Target/", figures)
   include_graphics(paths)
@@ -235,8 +225,8 @@ if (length(figures)>0) {
 
 ## Csnk1e (CK1E)
 ```{r}
-phospho_target_info("CK1E", 800, 600)
-figures <- list.files("CK_Target", ".*CK1E.*\\.png$")
+phospho_target_info("CK1E")
+figures <- list.files("CK_Target", ".*CK1E.*\\.pdf$")
 if (length(figures)>0) {
   paths <- paste0("CK_Target/", figures)
   include_graphics(paths)
@@ -245,8 +235,8 @@ if (length(figures)>0) {
 
 ## Csnk2a1 (CK2A1)
 ```{r}
-phospho_target_info("CK2A1", 1400, 800)
-figures <- list.files("CK_Target", ".*CK2A1.*\\.png$")
+phospho_target_info("CK2A1", 16, 12)
+figures <- list.files("CK_Target", ".*CK2A1.*\\.pdf$")
 if (length(figures)>0) {
   paths <- paste0("CK_Target/", figures)
   include_graphics(paths)
@@ -255,8 +245,8 @@ if (length(figures)>0) {
 
 ## Csnk2a2 (CK2A2)
 ```{r}
-phospho_target_info("CK2A2", 600, 800)
-figures <- list.files("CK_Target", ".*CK2A2.*\\.png$")
+phospho_target_info("CK2A2")
+figures <- list.files("CK_Target", ".*CK2A2.*\\.pdf$")
 if (length(figures)>0) {
   paths <- paste0("CK_Target/", figures)
   include_graphics(paths)
@@ -265,8 +255,8 @@ if (length(figures)>0) {
 
 ## Csnk2b (CK2B)
 ```{r}
-phospho_target_info("CK2B", 600, 800)
-figures <- list.files("CK_Target", ".*CK2B.*\\.png$")
+phospho_target_info("CK2B")
+figures <- list.files("CK_Target", ".*CK2B.*\\.pdf$")
 if (length(figures)>0) {
   paths <- paste0("CK_Target/", figures)
   include_graphics(paths)
